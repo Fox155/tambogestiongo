@@ -7,9 +7,9 @@ import (
 	"crypto/rsa"
 	"crypto/sha1"
 	"crypto/x509"
-	"encoding/gob"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -21,7 +21,10 @@ import (
 	"time"
 )
 
-const urlTambo string = "http://api.tambogestion.ga"
+const (
+	urlTambo string = "http://localhost:5000/producciones" // "http://api.tambogestion.ga"
+	tambo    string = "Tambo Ejemplo"
+)
 
 var (
 	keyFile = flag.String("key", "id_rsa", "Path to RSA private key")
@@ -29,28 +32,24 @@ var (
 
 func main() {
 	file, err := os.Open("./test.txt")
+	fileTemp, errt := os.Create("./test_temp.txt")
 
-	if err != nil {
+	if err != nil || errt != nil {
 		log.Fatalf("failed opening file: %s", err)
 	}
 
+	defer fileTemp.Close()
+
 	scanner := bufio.NewScanner(file)
 	scanner.Split(bufio.ScanLines)
+
+	writer := bufio.NewWriter(fileTemp)
 	var txtlines []string
 
 	for scanner.Scan() {
 		txtlines = append(txtlines, scanner.Text())
-	}
-
-	file.Close()
-
-	lineasBytes := make([][]byte, len(txtlines))
-
-	produc := []Producciones{}
-
-	for i, eachline := range txtlines {
-		lineasBytes[i] = []byte(eachline)
-		res1 := strings.Split(eachline, "/")
+		log.Println(scanner.Text())
+		res1 := strings.Split(scanner.Text(), "/")
 		ids, _ := strconv.ParseInt(res1[0], 10, 64)
 		idr, _ := strconv.ParseInt(res1[1], 10, 64)
 		prof, _ := strconv.ParseFloat(res1[2], 64)
@@ -67,70 +66,66 @@ func main() {
 			FechaInicio:    inicio,
 			FechaFin:       fin,
 		}
-		produc = append(produc, prod)
+		log.Println("Produccion:\t", prod)
+
+		if errEP := enviarProduccion(prod); errEP != nil {
+			fileTemp.Sync()
+			writer.WriteString(fmt.Sprintln(prod))
+			writer.Flush()
+		}
 	}
 
-	log.Println("Producciones:\t\t", produc)
+	defer file.Close()
 
+	// os.Create("./humo.txt")
+	// if errR := os.Remove("./humo.txt"); errR != nil {
+	// 	log.Fatal(errR)
+	// }
+}
+
+// enviarProduccion Encrypta y envia la una produccion
+func enviarProduccion(produccion Producciones) error {
 	privada, errP := fileToPrivateKey()
 	if errP != nil {
 		log.Panic(errP)
 	}
-	// fmt.Println("Privada:\t", privada)
 
-	fmt.Println("Linea:\t", produc[0])
-
-	var network bytes.Buffer        // Stand-in for a network connection
-	enc := gob.NewEncoder(&network) // Will write to network.
-	dec := gob.NewDecoder(&network) // Will read from network.
-	// Encode (send) the value.
-	errE := enc.Encode(produc[0])
-	if errE != nil {
-		log.Fatal("encode error:", errE)
+	jsonProd, errj := json.Marshal(produccion)
+	if errj != nil {
+		log.Fatal("Decryp Error:", errj)
 	}
-	// HERE ARE YOUR BYTES!!!!
-	fmt.Println("Encode:\t", network.Bytes())
 
-	var q Producciones
-	err = dec.Decode(&q)
+	conf, err := initConfig()
 	if err != nil {
-		log.Fatal("decode error:", err)
+		panic(err)
 	}
-	fmt.Println("Decode:\t", q)
 
-	resultado := encryptWithPublicKey(network.Bytes(), &privada.PublicKey)
-	fmt.Println("Resultado Bytes:\t", resultado)
-	fmt.Println("Resultado Bytes String:\t", string(resultado))
-
-	url := "http://localhost:5000/producciones"
+	resultado := encryptWithPublicKey(jsonProd, &privada.PublicKey)
 
 	requestBody, errJ := json.Marshal(map[string]interface{}{
-		"Tambo":     "Fox",
+		"Tambo":     tambo,
+		"Sucursal":  conf.Sucursal.Nombre,
 		"Contenido": resultado,
 	})
 	if errJ != nil {
 		log.Panic(errJ)
 	}
 
-	res, errH := http.Post(url, "application/json", bytes.NewBuffer(requestBody))
+	res, errH := http.Post(urlTambo, "application/json", bytes.NewBuffer(requestBody))
 	if errH != nil {
 		log.Panic(errH)
 	}
 
-	// res, _ := http.DefaultClient.Do(req)
-
 	defer res.Body.Close()
-
 	body, _ := ioutil.ReadAll(res.Body)
+	men := mensaje{}
+	json.Unmarshal(body, &men)
+	log.Println(res)
 
-	fmt.Println(res)
-	fmt.Println(string(body))
-
-	// fmt.Printf("Current Unix Time: %v\n", time.Now())
-
-	// time.Sleep(time.Minute)
-
-	// fmt.Printf("Current Unix Time: %v\n", time.Now())
+	if men.Mensaje != "OK" {
+		return errors.New("Error al enviar la Produccion")
+	}
+	return nil
 }
 
 // fileToPrivateKey bytes to private key
@@ -174,9 +169,17 @@ func encryptWithPublicKey(msg []byte, pub *rsa.PublicKey) []byte {
 type Producciones struct {
 	IDSesionOrdeño int64
 	IDRFID         int64
-	NroLactancia   int
 	Produccion     float64
 	FechaInicio    time.Time
 	FechaFin       time.Time
 	Medidor        map[string]string
 }
+
+// Producciones estructura modelo de una produccion
+type mensaje struct {
+	Mensaje string `json:"Mensaje"`
+}
+
+// 1/1003/101.1/M0/2016-09-01T10:11:12Z/2016-09-01T10:15:25Z
+// 1/1003/102.2/M0/2016-09-01T10:11:12Z/2016-09-01T10:15:25Z
+// 1/1003/103.3/M0/2016-09-01T10:11:12Z/2016-09-01T10:15:25Z
