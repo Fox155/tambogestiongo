@@ -31,6 +31,26 @@ var (
 )
 
 func main() {
+	conf, err := initConfig()
+	if err != nil {
+		panic(err)
+	}
+
+	tiempo, errTiempo := strconv.ParseInt(conf.Tiempos.Dormido, 10, 32)
+	if errTiempo != nil {
+		log.Fatalf("failed parser int: %s", errTiempo)
+	}
+
+	for {
+		log.Println("Despierta")
+		total(conf.Sucursal.Nombre)
+		log.Println("Duerme")
+
+		time.Sleep(time.Minute * time.Duration(tiempo))
+	}
+}
+
+func total(sucursal string) {
 	file, err := os.Open("./test.txt")
 	fileTemp, errt := os.Create("./test_temp.txt")
 
@@ -44,11 +64,8 @@ func main() {
 	scanner.Split(bufio.ScanLines)
 
 	writer := bufio.NewWriter(fileTemp)
-	var txtlines []string
 
 	for scanner.Scan() {
-		txtlines = append(txtlines, scanner.Text())
-		log.Println(scanner.Text())
 		res1 := strings.Split(scanner.Text(), "/")
 		ids, _ := strconv.ParseInt(res1[0], 10, 64)
 		idr, _ := strconv.ParseInt(res1[1], 10, 64)
@@ -66,9 +83,7 @@ func main() {
 			FechaInicio:    inicio,
 			FechaFin:       fin,
 		}
-		log.Println("Produccion:\t", prod)
-
-		if errEP := enviarProduccion(prod); errEP != nil {
+		if errEP := enviarProduccion(prod, sucursal); errEP != nil {
 			fileTemp.Sync()
 			writer.WriteString(fmt.Sprintln(prod))
 			writer.Flush()
@@ -76,15 +91,10 @@ func main() {
 	}
 
 	defer file.Close()
-
-	// os.Create("./humo.txt")
-	// if errR := os.Remove("./humo.txt"); errR != nil {
-	// 	log.Fatal(errR)
-	// }
 }
 
 // enviarProduccion Encrypta y envia la una produccion
-func enviarProduccion(produccion Producciones) error {
+func enviarProduccion(produccion Producciones, sucursal string) error {
 	privada, errP := fileToPrivateKey()
 	if errP != nil {
 		log.Panic(errP)
@@ -95,16 +105,11 @@ func enviarProduccion(produccion Producciones) error {
 		log.Fatal("Decryp Error:", errj)
 	}
 
-	conf, err := initConfig()
-	if err != nil {
-		panic(err)
-	}
-
 	resultado := encryptWithPublicKey(jsonProd, &privada.PublicKey)
 
 	requestBody, errJ := json.Marshal(map[string]interface{}{
 		"Tambo":     tambo,
-		"Sucursal":  conf.Sucursal.Nombre,
+		"Sucursal":  sucursal,
 		"Contenido": resultado,
 	})
 	if errJ != nil {
@@ -120,11 +125,11 @@ func enviarProduccion(produccion Producciones) error {
 	body, _ := ioutil.ReadAll(res.Body)
 	men := mensaje{}
 	json.Unmarshal(body, &men)
-	log.Println(res)
 
 	if men.Mensaje != "OK" {
 		return errors.New("Error al enviar la Produccion")
 	}
+	log.Println("Enviado:\t", produccion)
 	return nil
 }
 

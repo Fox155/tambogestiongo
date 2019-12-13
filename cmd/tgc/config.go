@@ -11,6 +11,9 @@ type config struct {
 	Sucursal struct {
 		Nombre string
 	}
+	Tiempos struct {
+		Dormido string
+	}
 }
 
 const configFile = "./config.toml"

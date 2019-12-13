@@ -1,2 +1,5 @@
 [sucursal]
 nombre = "Sucursal 1"
+
+[tiempos]
+dormido = "1"
