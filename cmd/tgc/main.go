@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	urlTambo string = "http://localhost:5000/producciones" // "http://api.tambogestion.ga"
+	urlTambo string = "http://tambogestion.ga:5001/producciones" // "http://api.tambogestion.ga"
 	tambo    string = "Tambo Ejemplo"
 )
 
